@@ -1,0 +1,29 @@
+python run_cail_with_yorn.py \
+  --vocab_file=../chinese_L-12_H-768_A-12/vocab.txt \
+  --bert_config_file=../chinese_L-12_H-768_A-12/bert_config.json \
+  --init_checkpoint=init_model/OUTPUT_DIR/cail_yorn/models/model.ckpt-30001 \
+  --do_train=True \
+  --train_file=../CAIL2019-RC-big/big_train_data.json \
+  --train_batch_size=8 \
+  --learning_rate=3e-5 \
+  --num_train_epochs=7.0 \
+  --max_seq_length=512 \
+  --output_dir=OUTPUT_DIR/cail_yorn/
+
+
+
+python run_cail_with_yorn.py \
+  --vocab_file=../chinese_L-12_H-768_A-12/vocab.txt \
+  --bert_config_file=../chinese_L-12_H-768_A-12/bert_config.json \
+  --do_predict=True \
+  --predict_file=../CAIL2019-RC-big/test.json \
+  --max_seq_length=512 \
+  --output_dir=OUTPUT_DIR/cail_yorn/
+
+
+python run_cail_with_yorn_input.py \
+--vocab_file=../chinese_L-12_H-768_A-12/vocab.txt \
+--bert_config_file=../chinese_L-12_H-768_A-12/bert_config.json \
+--do_predict=True \
+--max_seq_length=512 \
+--output_dir=OUTPUT_DIR/cail_yorn/

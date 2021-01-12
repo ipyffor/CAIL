@@ -173,9 +173,9 @@ class CailExample(object):
     """
 
     def __init__(self,
-                 qas_id = 1,
-                 question_text = None,
-                 doc_tokens = [],
+                 qas_id,
+                 question_text,
+                 doc_tokens,
                  orig_answer_text=None,
                  start_position=None,
                  end_position=None,
@@ -293,113 +293,6 @@ def read_cail_examples(input_file, is_training):
     """Read a cail json file into a list of CailExample."""
     with tf.gfile.Open(input_file, "r") as reader:
         input_data = json.load(reader)["data"]
-
-    examples = []
-    for entry in input_data:
-        for paragraph in entry["paragraphs"]:
-            paragraph_text = paragraph["context"]
-            raw_doc_tokens = customize_tokenizer(paragraph_text, do_lower_case=FLAGS.do_lower_case)
-            doc_tokens = []
-            char_to_word_offset = []
-            k = 0
-            temp_word = ""
-            for c in paragraph_text:
-                if tokenization._is_whitespace(c):
-                    char_to_word_offset.append(k - 1)
-                    continue
-                else:
-                    temp_word += c
-                    char_to_word_offset.append(k)
-                if FLAGS.do_lower_case:
-                    temp_word = temp_word.lower()
-                if temp_word == raw_doc_tokens[k]:
-                    doc_tokens.append(temp_word)
-                    temp_word = ""
-                    k += 1
-            assert k == len(raw_doc_tokens)
-
-            for qa in paragraph["qas"]:
-                qas_id = qa["id"]
-                question_text = qa["question"]
-                start_position = None
-                end_position = None
-                orig_answer_text = None
-                is_impossible = False
-                yes_or_no = 2
-                if is_training:
-                    is_impossible = qa["is_impossible"]
-                    if is_impossible == "true":
-                        is_impossible = True
-                    elif is_impossible == "false":
-                        is_impossible = False
-                    if (len(qa["answers"]) != 1) and (not is_impossible):
-                        raise ValueError(
-                            "For training, each question should have exactly 1 answer.")
-                    if not is_impossible:
-                        answer = qa["answers"][0]
-                        orig_answer_text = answer["text"]
-                        answer_offset = answer["answer_start"]
-                        answer_length = len(orig_answer_text)
-                        if answer_offset >= 0:
-                            start_position = char_to_word_offset[answer_offset]
-                            end_position = char_to_word_offset[answer_offset + answer_length - 1]
-                            # Only add answers where the text can be exactly recovered from the
-                            # document. If this CAN'T happen it's likely due to weird Unicode
-                            # stuff so we will just skip the example.
-                            #
-                            # Note that this means for training mode, every example is NOT
-                            # guaranteed to be preserved.
-                            actual_text = "".join(
-                                doc_tokens[start_position:(end_position + 1)])
-                            cleaned_answer_text = "".join(
-                                tokenization.whitespace_tokenize(orig_answer_text))
-                            if FLAGS.do_lower_case:
-                                cleaned_answer_text = cleaned_answer_text.lower()
-                            if actual_text.find(cleaned_answer_text) == -1:
-                                tf.logging.warning("Could not find answer: '%s' vs. '%s'",
-                                                   actual_text, cleaned_answer_text)
-                                # tf.logging.warning("raw tokens: %s",
-                                #                    raw_doc_tokens)
-                                # tf.logging.warning("tokens: %s",
-                                #                    doc_tokens)
-                                # tf.logging.warning("char_to_word_offset: %s",
-                                #                    char_to_word_offset)
-                                # tf.logging.warning("start_index: %s",
-                                #                    str(answer_offset))
-                                # tf.logging.warning("end_index: %s",
-                                #                    str(answer_offset))
-                                # tf.logging.warning("start_position: %s",
-                                #                    str(start_position))
-                                # tf.logging.warning("end_position: %s",
-                                #                    str(end_position))
-                                continue
-                        else:
-                            start_position = -1
-                            end_position = -1
-                            if orig_answer_text == "YES":
-                                yes_or_no = 0
-                            elif orig_answer_text == "NO":
-                                yes_or_no = 1
-                    else:
-                        start_position = -1
-                        end_position = -1
-                        orig_answer_text = ""
-
-                example = CailExample(
-                    qas_id=qas_id,
-                    question_text=question_text,
-                    doc_tokens=doc_tokens,
-                    orig_answer_text=orig_answer_text,
-                    start_position=start_position,
-                    end_position=end_position,
-                    is_impossible=is_impossible,
-                    y_or_n=yes_or_no)
-                examples.append(example)
-
-    return examples
-
-def get_cail_examples(input_data, is_training):
-    """Read a cail json file into a list of CailExample."""
 
     examples = []
     for entry in input_data:
@@ -1242,7 +1135,6 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
         json.dump(pred_dict[-1], writer, ensure_ascii=False, indent=4)
         writer.write(']')
     tf.logging.info("Writing finished")
-    return pred_dict
 
 
 def get_final_text(pred_text, orig_text, do_lower_case):
@@ -1434,10 +1326,10 @@ def validate_flags_or_throw(bert_config):
             raise ValueError(
                 "If `do_train` is True, then `train_file` must be specified.")
 
-    # if FLAGS.do_predict:
-    #     if not FLAGS.predict_file:
-    #         raise ValueError(
-    #             "If `do_predict` is True, then `predict_file` must be specified.")
+    if FLAGS.do_predict:
+        if not FLAGS.predict_file:
+            raise ValueError(
+                "If `do_predict` is True, then `predict_file` must be specified.")
 
     if FLAGS.max_seq_length > bert_config.max_position_embeddings:
         raise ValueError(
@@ -1467,6 +1359,24 @@ def main(_):
     eval_examples = None
     num_train_steps = None
     num_warmup_steps = None
+    if FLAGS.do_train:
+        train_examples = read_cail_examples(
+            input_file=FLAGS.train_file, is_training=True)
+
+        # Pre-shuffle the input to avoid having to make a very large shuffle
+        # buffer in in the `input_fn`.
+        rng = random.Random(12345)
+        rng.shuffle(train_examples)
+
+        eval_examples = train_examples[:FLAGS.num_of_eval_samples]
+
+        save_examples(os.path.join(FLAGS.output_dir, FLAGS.eval_examples_file), eval_examples)
+
+        train_examples = train_examples[FLAGS.num_of_eval_samples:]
+
+        num_train_steps = int(
+            len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
+        num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
 
     model_fn = model_fn_builder(
         bert_config=bert_config,
@@ -1493,108 +1403,135 @@ def main(_):
         config=run_config,
         params=hyparams)
 
-    input_data = [
-        {
-            'paragraphs': [
-                {
-                    'casename': 'asdasds',
-                    'context': '经审查,原告提供的证据1-3、被告中华联合广东分公司提供的证据4-5、被告万友公司提供的证据6,各方对其真实性均没有异议,本院对其真实性予以确认综合本院采信的证据及当事人的陈述,本院认定以下事实:2015年6月1日,田x17驾驶粤A×××××号车辆与严x3驾驶的赣C×××××号重型仓栅式货车发生碰撞,造成两车不同程度损坏的交通事故交警部门作出事故认定书,认定严x3承担事故的全部责任,田x17不负事故责任粤A×××××号车辆在原告处投保了保险金额为908000元的机动车损失保险,事故发生在保险期间内事故发生后,粤A×××××号车辆的被保险人陈x18就该车辆的损失以财产保险合同纠纷起诉至佛山市禅城区人民法院案经审理,佛山市禅城区人民法院于2015年8月18日作出(2015)佛城法民二初字第1006号民事判决,查明粤A×××××号车辆经广州市华盟价格事务所有限公司评估,损失价格为241541元,陈x18支付了粤A×××××号车辆的维修费241541元、评估费9050元;本案原告在庭审中明确表示不申请重新对车辆损失进行评估鉴定并判决原告向陈x18支付粤A×××××号车辆损失保险理赔款250591元2015年10月11日,原告向陈x18赔付了250591元及诉讼费用2529元后原告提起本案之诉并查明,赣C×××××号车辆的所有人为被告万友公司,该车辆在被告中华联合广东分公司处投保了交强险,事故发生在保险期内事故发生后,被告中华联合广东分公司向该车辆的被保险人许x19赔付了2000元诉讼中,被告徐11确认其为该车辆的实际支配人,严x3是被告徐11雇请,是从事派遣工作过程中发生案涉交通事故被告徐11与被告万友公司签订《车辆挂靠合同书》,被告万友公司同意被告徐11就赣C×××××号车辆挂靠被告万友公司名下',
-                    'qas': [
-                        {
-                            'question': '事故结果如何？',
-                            'is_impossible': 'false',
-                            'id': 'e139eef6-fc0c-4953-acec-a83a0095ce4e.txt_001',
-                            'answers': [
-                                {
-                                    'answer_start': 153,
-                                    'text': '两车不同程度损坏'
-                                }
-                            ]
-                        },
-                        ]
-                }
-            ],
-            'caseid': 'e139eef6-fc0c-4953-acec-a83a0095ce4e.txt',
-            'domain': 'civil'}
-    ]
+    if FLAGS.do_train:
+        # We write to a temporary file to avoid storing very large constant tensors
+        # in memory.
+        train_writer = FeatureWriter(
+            filename=os.path.join(FLAGS.output_dir, "train.tf_record"),
+            is_training=True)
+        convert_examples_to_features(
+            examples=train_examples,
+            tokenizer=tokenizer,
+            max_seq_length=FLAGS.max_seq_length,
+            doc_stride=FLAGS.doc_stride,
+            max_query_length=FLAGS.max_query_length,
+            is_training=True,
+            output_fn=train_writer.process_feature)
+        train_writer.close()
 
+        tf.logging.info("***** Running training *****")
+        tf.logging.info("  Num orig examples = %d", len(train_examples))
+        tf.logging.info("  Num split examples = %d", train_writer.num_features)
+        tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+        tf.logging.info("  Num steps = %d", num_train_steps)
+        del train_examples
 
-    while True:
-        context = input('context: ')
-        # context = '经审查,原告提供的证据1-3、被告中华联合广东分公司提供的证据4-5、被告万友公司提供的证据6,各方对其真实性均没有异议,本院对其真实性予以确认综合本院采信的证据及当事人的陈述,本院认定以下事实:2015年6月1日,田x17驾驶粤A×××××号车辆与严x3驾驶的赣C×××××号重型仓栅式货车发生碰撞,造成两车不同程度损坏的交通事故交警部门作出事故认定书,认定严x3承担事故的全部责任,田x17不负事故责任粤A×××××号车辆在原告处投保了保险金额为908000元的机动车损失保险,事故发生在保险期间内事故发生后,粤A×××××号车辆的被保险人陈x18就该车辆的损失以财产保险合同纠纷起诉至佛山市禅城区人民法院案经审理,佛山市禅城区人民法院于2015年8月18日作出(2015)佛城法民二初字第1006号民事判决,查明粤A×××××号车辆经广州市华盟价格事务所有限公司评估,损失价格为241541元,陈x18支付了粤A×××××号车辆的维修费241541元、评估费9050元;本案原告在庭审中明确表示不申请重新对车辆损失进行评估鉴定并判决原告向陈x18支付粤A×××××号车辆损失保险理赔款250591元2015年10月11日,原告向陈x18赔付了250591元及诉讼费用2529元后原告提起本案之诉并查明,赣C×××××号车辆的所有人为被告万友公司,该车辆在被告中华联合广东分公司处投保了交强险,事故发生在保险期内事故发生后,被告中华联合广东分公司向该车辆的被保险人许x19赔付了2000元诉讼中,被告徐11确认其为该车辆的实际支配人,严x3是被告徐11雇请,是从事派遣工作过程中发生案涉交通事故被告徐11与被告万友公司签订《车辆挂靠合同书》,被告万友公司同意被告徐11就赣C×××××号车辆挂靠被告万友公司名下'
-        input_data[0]['paragraphs'][0]['context'] = context
+        train_input_fn = input_fn_builder(
+            input_file=train_writer.filename,
+            seq_length=FLAGS.max_seq_length,
+            is_training=True,
+            drop_remainder=True)
 
+        # eval data set process
+        # eval_examples = read_cail_examples(
+        #     input_file=FLAGS.eval_file, is_training=True)
+        eval_writer = FeatureWriter(
+            filename=os.path.join(FLAGS.output_dir, "eval.tf_record"),
+            is_training=True)
+        convert_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=FLAGS.max_seq_length,
+            doc_stride=FLAGS.doc_stride,
+            max_query_length=FLAGS.max_query_length,
+            is_training=True,
+            output_fn=eval_writer.process_feature)
+        del eval_examples
 
-        while True:
-            question = input('question:')
-            if question == 'q':
-                break
-            # question = '事故结果如何？'
-            input_data[0]['paragraphs'][0]['qas'][0]['question'] = question
-            eval_examples = get_cail_examples(
-                input_data, is_training=False)
+        eval_input_fn = input_fn_builder(
+            input_file=eval_writer.filename,
+            seq_length=FLAGS.max_seq_length,
+            is_training=True,
+            drop_remainder=False)
+        # estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
-            # eval_examples = load_examples(os.path.join(FLAGS.output_dir, FLAGS.eval_examples_file))
-            eval_writer = FeatureWriter(
-                filename=os.path.join(FLAGS.output_dir, "predict.tf_record"),
-                is_training=False)
-            eval_features = []
+        # early stopping
+        early_stopping_hook = tf.contrib.estimator.stop_if_no_decrease_hook(
+            estimator=estimator,
+            metric_name='eval_loss',
+            max_steps_without_decrease=FLAGS.max_steps_without_decrease,
+            eval_dir=None,
+            min_steps=0,
+            run_every_secs=None,
+            run_every_steps=FLAGS.save_checkpoints_steps)
+        train_spec = tf.estimator.TrainSpec(input_fn=train_input_fn, max_steps=num_train_steps,
+                                            hooks=[early_stopping_hook])
+        eval_spec = tf.estimator.EvalSpec(input_fn=eval_input_fn, steps=600, throttle_secs=0)
+        tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 
-            def append_feature(feature):
-                eval_features.append(feature)
-                eval_writer.process_feature(feature)
+    if FLAGS.do_predict:
+        eval_examples = read_cail_examples(
+            input_file=FLAGS.predict_file, is_training=False)
+        # eval_examples = load_examples(os.path.join(FLAGS.output_dir, FLAGS.eval_examples_file))
+        eval_writer = FeatureWriter(
+            filename=os.path.join(FLAGS.output_dir, "predict.tf_record"),
+            is_training=False)
+        eval_features = []
 
-            convert_examples_to_features(
-                examples=eval_examples,
-                tokenizer=tokenizer,
-                max_seq_length=FLAGS.max_seq_length,
-                doc_stride=FLAGS.doc_stride,
-                max_query_length=FLAGS.max_query_length,
-                is_training=False,
-                output_fn=append_feature)
-            eval_writer.close()
+        def append_feature(feature):
+            eval_features.append(feature)
+            eval_writer.process_feature(feature)
 
-            tf.logging.info("***** Running predictions *****")
-            tf.logging.info("  Num orig examples = %d", len(eval_examples))
-            tf.logging.info("  Num split examples = %d", len(eval_features))
-            tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
+        convert_examples_to_features(
+            examples=eval_examples,
+            tokenizer=tokenizer,
+            max_seq_length=FLAGS.max_seq_length,
+            doc_stride=FLAGS.doc_stride,
+            max_query_length=FLAGS.max_query_length,
+            is_training=False,
+            output_fn=append_feature)
+        eval_writer.close()
 
-            predict_input_fn = input_fn_builder(
-                input_file=eval_writer.filename,
-                seq_length=FLAGS.max_seq_length,
-                is_training=False,
-                drop_remainder=False)
+        tf.logging.info("***** Running predictions *****")
+        tf.logging.info("  Num orig examples = %d", len(eval_examples))
+        tf.logging.info("  Num split examples = %d", len(eval_features))
+        tf.logging.info("  Batch size = %d", FLAGS.predict_batch_size)
 
-            # If running eval on the TPU, you will need to specify the number of
-            # steps.
-            all_results = []
-            for result in estimator.predict(
-                    predict_input_fn, yield_single_examples=True):
-                if len(all_results) % 1000 == 0:
-                    tf.logging.info("Processing example: %d" % (len(all_results)))
-                unique_id = int(result["unique_ids"])
-                start_logits = [float(x) for x in result["start_logits"].flat]
-                end_logits = [float(x) for x in result["end_logits"].flat]
-                unk_logits = [float(x) for x in result["unk_logits"].flat]
-                yes_logits = [float(x) for x in result["yes_logits"].flat]
-                no_logits = [float(x) for x in result["no_logits"].flat]
-                all_results.append(
-                    RawResult(
-                        unique_id=unique_id,
-                        start_logits=start_logits,
-                        end_logits=end_logits,
-                        unk_logits=unk_logits,
-                        yes_logits=yes_logits,
-                        no_logits=no_logits))
+        predict_input_fn = input_fn_builder(
+            input_file=eval_writer.filename,
+            seq_length=FLAGS.max_seq_length,
+            is_training=False,
+            drop_remainder=False)
 
-            output_prediction_file = os.path.join(FLAGS.output_dir, "result.json")
-            # output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
-            # output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
+        # If running eval on the TPU, you will need to specify the number of
+        # steps.
+        all_results = []
+        for result in estimator.predict(
+                predict_input_fn, yield_single_examples=True):
+            if len(all_results) % 1000 == 0:
+                tf.logging.info("Processing example: %d" % (len(all_results)))
+            unique_id = int(result["unique_ids"])
+            start_logits = [float(x) for x in result["start_logits"].flat]
+            end_logits = [float(x) for x in result["end_logits"].flat]
+            unk_logits = [float(x) for x in result["unk_logits"].flat]
+            yes_logits = [float(x) for x in result["yes_logits"].flat]
+            no_logits = [float(x) for x in result["no_logits"].flat]
+            all_results.append(
+                RawResult(
+                    unique_id=unique_id,
+                    start_logits=start_logits,
+                    end_logits=end_logits,
+                    unk_logits=unk_logits,
+                    yes_logits=yes_logits,
+                    no_logits=no_logits))
 
-            pred_dict = write_predictions(eval_examples, eval_features, all_results,
-                              FLAGS.n_best_size, FLAGS.max_answer_length,
-                              FLAGS.do_lower_case, output_prediction_file)
-            print('answer: {}'.format(pred_dict[0]['answer']))
+        output_prediction_file = os.path.join(FLAGS.output_dir, "result.json")
+        # output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
+        # output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
+
+        write_predictions(eval_examples, eval_features, all_results,
+                          FLAGS.n_best_size, FLAGS.max_answer_length,
+                          FLAGS.do_lower_case, output_prediction_file)
 
 
 if __name__ == "__main__":
