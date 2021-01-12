@@ -5,5 +5,5 @@ bert/OUTPUT_DIR
 **/*.zip
 *.exe
 **/__pycache__
-chinese_L-12_H-768_A-12
+chinese_L-12_H-768_A-12/bert_model*
 CAIL2019-RC-big

@@ -27,3 +27,12 @@ python run_cail_with_yorn_input.py \
 --do_predict=True \
 --max_seq_length=512 \
 --output_dir=OUTPUT_DIR/cail_yorn/
+
+
+# 预测,在bert目录下执行, OUTPUT_DIR为模型解压的文件路径
+python run_cail_with_yorn_input.py \
+--vocab_file=../chinese_L-12_H-768_A-12/vocab.txt \
+--bert_config_file=../chinese_L-12_H-768_A-12/bert_config.json \
+--do_predict=True \
+--max_seq_length=512 \
+--output_dir=OUTPUT_DIR/cail_yorn/
